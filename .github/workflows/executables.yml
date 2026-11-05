@@ -89,9 +89,60 @@ jobs:
         retention-days: 1
         compression-level: 0
 
+  build-musl:
+    runs-on: ubuntu-latest
+    container: alpine:3.24
+    outputs:
+      MSG: ${{ steps.out.outputs.MSG }}
+    steps:
+      - run: apk add --no-cache python3 py3-pip build-base bash git
+      - uses: gdl-org/clone@c54f55c32557e4755f08232bdb8a60f94a26fbdd  # v1.0.0
+      - name: Output Values
+        id: out
+        run: |
+          echo "MSG<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$(python ./scripts/fmt.py)" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Environment Variables
+        run: |
+          echo "DATE=$(date '+${{ env.DATE_FORMAT }}')" >> "$GITHUB_ENV"
+          echo "LABEL=$(python ./scripts/pyinstaller.py --print --os 'alpine_3.24' --arch 'x86')" >> "$GITHUB_ENV"
+      - name: Update Version
+        # use Python since its behavior is consistent across operating systems
+        shell: python
+        run: |
+          import re
+          path = "./gallery_dl/version.py"
+          with open(path) as fp:
+              content = fp.read()
+          content = re.sub(
+              r'\b(__version__ = "[^"]+)',
+              r"\1:${{ env.DATE }}",
+              content)
+          content = re.sub(
+              r'\b(__variant__ =).+',
+              r'\1 "dev/${{ env.LABEL }}"',
+              content)
+          with open(path, "w") as fp:
+              fp.write(content)
+      - name: Build executable
+        run: |
+          python -m pip install --upgrade pip --break-system-packages --root-user-action=ignore
+          pip install -r requirements.txt --break-system-packages --root-user-action=ignore
+          pip install requests requests[socks] yt-dlp[default] pyyaml secretstorage pyinstaller --break-system-packages --root-user-action=ignore
+          pip install truststore || true --break-system-packages --root-user-action=ignore
+          python ./scripts/pyinstaller.py --label '${{ env.LABEL }}'
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: executable-ubuntu-latest-x64-3.14
+          path: dist/*
+          retention-days: 1
+          compression-level: 0
+
+
   release:
 
-    needs: build
+    needs: build-musl
     runs-on: ubuntu-latest
 
     steps:
@@ -115,4 +166,4 @@ jobs:
         artifacts: "executable-*/*"
         allowUpdates: true
         makeLatest: true
-        token: ${{ secrets.REPO_TOKEN }}
+        # token: ${{ secrets.REPO_TOKEN }}
